@@ -1,0 +1,23 @@
+# VS Code 本地工作区配置(与项目无关)
+.vscode/
+
+# macOS / Linux 杂项
+.DS_Store
+Thumbs.db
+
+# 临时调试脚本
+*.bak
+*.tmp
+*.log
+
+# 测试时的临时文件(排查遗留)
+debug_*.sh
+test_*.sh
+list_*.sh
+diag*.sh
+probe.sh
+try_models.sh
+try_*.sh
+
+# 早期 settings 备份
+settings[0-9].json
