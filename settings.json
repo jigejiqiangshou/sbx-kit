@@ -1,31 +1,31 @@
 {
-  "alwaysThinkingEnabled": true,
-  "skipDangerousModePermissionPrompt": true,
-  "themeId": 1,
-  "defaultMode": "bypassPermissions",
-  "bypassPermissionsModeAccepted": true,
-  "model": "claude-sonnet-4-5",
-  "modelOverrides": {
-    "claude-sonnet-4-5": "claude-sonnet-4-6",
-    "claude-sonnet-4-6": "claude-sonnet-4-6",
-    "claude-opus-4-7": "claude-opus-4-7",
-    "claude-opus-4-8": "claude-opus-4-8",
-    "claude-haiku-4-5": "claude-haiku-4-5-20251001"
-  },
-  "env": {
-    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8765",
-    "ANTHROPIC_API_KEY": "sk-ant-pcQNfJEvUIwr4IKQ"
-  },
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/agent/start-relay.sh"
-          }
+    "alwaysThinkingEnabled": true,
+    "skipDangerousModePermissionPrompt": true,
+    "themeId": 1,
+    "defaultMode": "bypassPermissions",
+    "bypassPermissionsModeAccepted": true,
+    "model": "claude-sonnet-4-5",
+    "modelOverrides": {
+        "claude-sonnet-4-5": "claude-sonnet-4-6",
+        "claude-sonnet-4-6": "claude-sonnet-4-6",
+        "claude-opus-4-7": "claude-opus-4-7",
+        "claude-opus-4-8": "claude-opus-4-8",
+        "claude-haiku-4-5": "claude-haiku-4-5-20251001"
+    },
+    "env": {
+        "ANTHROPIC_BASE_URL": "http://127.0.0.1:8765",
+        "ANTHROPIC_API_KEY": "sk-ant-pcQNfJEvUIwr4IKQ"
+    },
+    "hooks": {
+        "SessionStart": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "/home/agent/start-relay.sh"
+                    }
+                ]
+            }
         ]
-      }
-    ]
-  }
+    }
 }
