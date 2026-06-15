@@ -377,3 +377,62 @@ if ($Source -eq 'Local') {
 - 历史上 5/14 在 `C:\Users\Zhaoji\Desktop\sbx` 直接跑 GitHub 模式,`Get-Location` 兜底,3 文件就在 CWD,**没**踩到
 - 5/15 用户 cd 到 `sbx\test` 才暴露
 - **教训**:任何**只在某些 CWD 下成立**的"自动探测"逻辑都是隐藏 bug,需要按参数意图(`-Source`)显式分支
+
+---
+
+## 难点 11:`-Source GitHub` 在 cold-start microVM 上 git clone 偶发 exit 1
+
+**现象**:
+- 第一次跑 `New-ClaudeSbx -Name foo -Source GitHub` 报:
+  ```
+  [5/5] Deploying kit (GitHub)...
+         git detected
+
+  [ERROR] sandbox-direct `git clone` failed (exit 1).
+  ```
+- 几分钟后**重试** 同一个命令(`New-ClaudeSbx -Name bar -Source GitHub`)就成功了
+- 沙箱内 `getent hosts github.com` ✅,`</dev/tcp/github.com/443` ✅,DNS 没问题
+- `sbx policy ls` 也有 `sandbox:<name>` 的 `github.com:443` scoped 规则
+- 手动跑 `sbx exec <name> bash -lc 'git clone ...'` 单独测试也成功
+
+**根因**:
+- `sbx create` 返回成功的瞬间, microVM 还在**后台异步初始化**一些子系统
+- 立刻发 `bash -lc 'git clone ...'`,某些关键路径还没就绪:
+  - `/tmp` 目录权限初始化
+  - `~/.gitconfig` 加载
+  - `git` 二进制(可能来自 lazy-mount)就绪
+  - DNS resolver 缓存
+- `bash -lc` 看到 `git` 存在于 PATH(检测通过),但实际 `git clone` 内部 syscall 时某些子资源未就绪 → 退出码 **1**(generic error)或 **128**(fatal)
+- 这是 **microVM cold-start race**,**不是** 网络 / DNS / branch 问题
+
+**修复**(`New-ClaudeSbx` 内 retry loop):
+
+```powershell
+$cloneCmd = "git clone --depth 1 --branch '$Ref' '$RepoUrl' /tmp/sbx-kit"
+$rc = 1
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+    # `rm -rf` 在沙箱内跑,清理上次残留
+    $rc = Invoke-Sbx -Args @('exec', $Name, 'bash', '-lc', "rm -rf /tmp/sbx-kit && $cloneCmd")
+    if ($rc -eq 0) { break }
+    if ($attempt -lt 3) {
+        Start-Sleep -Seconds 3
+    }
+}
+if ($rc -ne 0) {
+    Write-Host "[ERROR] git clone failed (exit $rc) after 3 attempts. ..."
+    return
+}
+```
+
+**为什么 3 次够了**:
+- cold-start race 通常 < 1s
+- `Start-Sleep -Seconds 3` 给 microVM 充足时间初始化
+- 3 次 × 3s = **9s** 总开销,绝大多数情况 1 次成功
+
+**用户**:
+- 报错信息升级: `after 3 attempts` + 明确说"cold-start race, 重试或用 `-Source Local`"
+- 不再让用户**猜** 3 个无关的可能原因
+
+**注意**:
+- 这是 `Source=GitHub` 模式特有的(`Source=Local` 走 base64 推,**不**需要 microVM 启动到稳定态)
+- `Source=Local` 第一次 `sbx exec` 也是 cold-start,但只是 `mkdir` + `base64 -d > file` 三个 syscalls,出错概率极低

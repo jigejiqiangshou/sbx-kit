@@ -97,7 +97,7 @@ New-ClaudeSbx [-Name <string>] [-KitDir <string>] [-Source {Local, GitHub}] [-Re
 4. **加 scoped policy**:`cc.honoursoft.cn:443`;`Source=GitHub` 时多加 `github.com:443`
 5. **部署 kit**:
    - `Source=Local` → 调 `Push-SbxKit`(base64 推 3 文件 + chmod + 启 relay)
-   - `Source=GitHub` → 沙箱内 `command -v git` → `git clone $RepoUrl /tmp/sbx-kit` → `bash /tmp/sbx-kit/install.sh`
+   - `Source=GitHub` → 沙箱内 `command -v git` → `git clone $RepoUrl /tmp/sbx-kit`(**3 次重试 + 3s 间隔**,应对 cold-start race)→ `bash /tmp/sbx-kit/install.sh`
 
 **KitDir 解析边界**:
 - `-Source Local`:**必须**有 `KitDir`,且里面含 `relay.py` / `start-relay.sh` / `settings.json`;函数体内校验

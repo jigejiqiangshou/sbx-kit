@@ -123,6 +123,7 @@ sbx rm <name>      # 等 60s+, 不要 Ctrl+C
 | 2026-06-14 深夜 | `New-ClaudeSbx -Source {Local, GitHub}` 双路径实现,TUI 验证通过 |
 | 2026-06-15 | 文档完善,`README.md` 新建,4 个文件 commit + push |
 | 2026-06-15 | 修 `New-ClaudeSbx` KitDir 校验 bug(只在 `-Source Local` 校验);补 ARCHITECTURE + TROUBLESHOOTING 文档 |
+| 2026-06-16 | 修 `-Source GitHub` cold-start race:git clone 段加 3 次 retry + 3s 间隔,补 TROUBLESHOOTING 难点 11 |
 
 ## 下一步行动指令(已废弃)
 
