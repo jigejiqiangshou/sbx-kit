@@ -324,3 +324,56 @@ sbx exec sandbox bash -lc 'curl http://127.0.0.1:8765/v1/models'
 - 不是占位符替换问题
 - 不是 `cc.honoursoft.cn` 网络问题
 - 是测试探针流程不完整 — 缺少"启 relay"这一步
+
+---
+
+## 难点 10:`-Source GitHub` 时 `New-ClaudeSbx` 误报"KitDir missing relay.py"
+
+**现象**:
+- 在 `C:\Users\Zhaoji\Desktop\sbx\test` 下跑 `New-ClaudeSbx -Name async-claude -Source GitHub`
+- 立刻红字:
+  ```
+  [ERROR] KitDir 'C:\Users\Zhaoji\Desktop\sbx\test' is missing relay.py
+  ```
+- 沙箱**没**创建,GitHub 流程**没**机会跑
+
+**根因**:
+- 早期 `New-ClaudeSbx` 把 KitDir 校验放在函数最顶部,**不**分 `-Source` 都跑
+- 校验逻辑:
+  1. 若 `$KitDir` 没传,fallback 到 `$PSScriptRoot`(profile 自身目录,**不**含 kit)→ `Get-Location`(用户 CWD)
+  2. 校验 `relay.py` / `start-relay.sh` / `settings.json` 是否在 `$KitDir` 下
+- 表面上看起来"合理",实际上**只有 `-Source Local` 才需要** KitDir
+- 历史上在 `C:\Users\Zhaoji\Desktop\sbx`(恰好有 3 文件)下跑 GitHub 模式,`Get-Location` 兜底**碰巧**通过校验,掩盖了 bug
+- 一旦用户 cd 到子目录(如 `sbx\test`),bug 暴露
+
+**修复**:
+- 把整个 KitDir 解析 + 3 文件校验包到 `if ($Source -eq 'Local')` 里
+- `-Source GitHub` 完全跳过这段,直接走步骤 2(host 前置校验)
+
+```powershell
+# 1. Resolve paths (only needed for -Source Local; -Source GitHub
+#    pulls the kit from a git clone inside the sandbox, so KitDir
+#    is irrelevant and we MUST NOT require it on disk).
+if ($Source -eq 'Local') {
+    if (-not $KitDir) {
+        if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'relay.py'))) {
+            $KitDir = $PSScriptRoot
+        }
+        else {
+            $KitDir = (Get-Location).Path
+        }
+    }
+    foreach ($f in "relay.py", "start-relay.sh", "settings.json") {
+        if (-not (Test-Path (Join-Path $KitDir $f))) {
+            Write-Host "[ERROR] KitDir '$KitDir' is missing $f" -ForegroundColor Red
+            return
+        }
+    }
+}
+```
+
+**注意**:
+- 这个 bug **只有在用户 cd 到非 kit 目录**时才会暴露
+- 历史上 5/14 在 `C:\Users\Zhaoji\Desktop\sbx` 直接跑 GitHub 模式,`Get-Location` 兜底,3 文件就在 CWD,**没**踩到
+- 5/15 用户 cd 到 `sbx\test` 才暴露
+- **教训**:任何**只在某些 CWD 下成立**的"自动探测"逻辑都是隐藏 bug,需要按参数意图(`-Source`)显式分支

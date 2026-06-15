@@ -99,6 +99,11 @@ New-ClaudeSbx [-Name <string>] [-KitDir <string>] [-Source {Local, GitHub}] [-Re
    - `Source=Local` → 调 `Push-SbxKit`(base64 推 3 文件 + chmod + 启 relay)
    - `Source=GitHub` → 沙箱内 `command -v git` → `git clone $RepoUrl /tmp/sbx-kit` → `bash /tmp/sbx-kit/install.sh`
 
+**KitDir 解析边界**:
+- `-Source Local`:**必须**有 `KitDir`,且里面含 `relay.py` / `start-relay.sh` / `settings.json`;函数体内校验
+- `-Source GitHub`:**完全跳过** KitDir 解析和 3 文件校验 — 3 文件是沙箱内 `git clone` 拉,不在 host 上
+- 历史上(-Source GitHub)曾误把 KitDir 校验放在函数顶部,导致 CWD 不在 `C:\Users\Zhaoji\Desktop\sbx` 时直接报红字"missing relay.py",**GitHub 模式根本没机会跑**。修法:把 KitDir 校验整段包到 `if ($Source -eq 'Local')` 里(见 `TROUBLESHOOTING.md` 难点 10)
+
 **错误显式化**:用 `Write-Host -ForegroundColor Red` 替代 `throw`,**完全**绕开 PowerShell ErrorRecord 渲染机制,让红色 ERROR 块只出现在**真正**计划性错误时。
 
 ### `Push-SbxKit` — Local 路径的部署实现

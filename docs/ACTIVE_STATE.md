@@ -122,6 +122,7 @@ sbx rm <name>      # 等 60s+, 不要 Ctrl+C
 | 2026-06-14 晚 | `Test-ClaudeSbx` bug 修复;GitHub 库 `jigejiqiangshou/sbx-kit` 创建 + `install.sh` push |
 | 2026-06-14 深夜 | `New-ClaudeSbx -Source {Local, GitHub}` 双路径实现,TUI 验证通过 |
 | 2026-06-15 | 文档完善,`README.md` 新建,4 个文件 commit + push |
+| 2026-06-15 | 修 `New-ClaudeSbx` KitDir 校验 bug(只在 `-Source Local` 校验);补 ARCHITECTURE + TROUBLESHOOTING 文档 |
 
 ## 下一步行动指令(已废弃)
 
