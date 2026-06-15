@@ -1,140 +1,130 @@
-# 活跃状态与未竟目标
+# 活跃状态
 
-> 给未来接手这个项目的 Agent 或开发者阅读的"进度存档"。
-> 读完这一份,你应该知道:做完了什么、卡在哪里、下一步必须先做什么。
+> 给未来接手这个项目的 Agent 或开发者阅读的"项目快照"。
+> 读完这一份,你应该知道:项目处于什么状态、有哪些文件、各组件的角色。
 
-## 未竟目标(Pending Goals)
+## 项目状态
 
-### 1. 清理全局冗余 network policy 规则 [TODO: 需要人类决策]
+**稳定态**。所有计划性任务已全部完成,本仓库可被任何新机器克隆即用。
 
-`sbx policy ls` 当前有**两条** `cc.honoursoft.cn:443` 规则:
-- `local / all` — 早先全局注册的(无作用域)
-- `local / sandbox:claude-sbx3` — 上一轮 `New-ClaudeSbx` 注册的(本沙箱 scoped)
+- ✅ 核心三件套(`relay.py` / `start-relay.sh` / `settings.json`)稳定运行
+- ✅ `New-ClaudeSbx` 双路径(`-Source Local` / `-Source GitHub`)端到端验证通过
+- ✅ `install.sh` 已 push 到 GitHub,沙箱内自部署
+- ✅ 全局冗余 policy 已清理,所有 network rule 均 scoped
+- ✅ 4 个 PowerShell 函数(`Invoke-Sbx` / `New-ClaudeSbx` / `Push-SbxKit` / `Test-ClaudeSbx`)零非计划性报错
 
-全局那条是冗余的(已被 scoped 那条覆盖),但删除 `local / all` 会**影响其他可能存在但已 stopped 的沙箱**的复活动作。需要人类确认是否清掉:
+**当前没有未竟目标**。`docs/ACTIVE_STATE.md` 历史上记录的"未竟目标"清单(全局 policy 清理、stopped 沙箱清理、Test-ClaudeSbx bug 修复、settings.json 尾换行、GitHub 化)已在 2026-06-14 全部完成。
 
-```bash
-sbx policy rm <rule-id-of-the-global-one>
-```
+## 已交付清单
 
-规则 ID 可通过 `sbx policy ls` 第一列查到。
+### 仓库文件(本仓库 `jigejiqiangshou/sbx-kit`)
 
-### 2. 清理历史 stopped 沙箱 [TODO: 需要人类手动操作]
+| 路径 | 大小 | 角色 |
+|---|---|---|
+| `relay.py` | 4825 字节 | HTTP relay,监听 127.0.0.1:8765,改写 `model` 字段,转发到中转站 |
+| `start-relay.sh` | 910 字节 | SessionStart hook,setsid+nohup+disown 拉起 relay,父进程变 init |
+| `settings.json` | 940 字节 | Claude Code 配置:env + modelOverrides + SessionStart hook |
+| `install.sh` | ~2.8 KB | 库内置部署脚本,沙箱内 git clone 后由它把 3 文件拷到 `/home/agent/` |
+| `docs/ARCHITECTURE_AND_FLOW.md` | — | 架构、控制流、技术栈、4 个边界检查点 |
+| `docs/TROUBLESHOOTING.md` | — | 9 个真实技术难点,按"现象 → 根因 → 修复"组织 |
+| `docs/ACTIVE_STATE.md` | — | 本文件 |
+| `README.md` | — | 项目入口:快速开始、双路径、文件清单、文档链 |
+| `.gitignore` | 324 字节 | 排除 `.vscode/`、临时探针脚本、CRLF 备份 |
 
-`sbx ls` 当前:
-```
-claude-sbx    stopped   (被 New-ClaudeSbx 重名拒绝保护)
-claude-sbx2   stopped   (同上,首次功能测试遗留)
-claude-sbx3   running   (当前可用)
-```
+### 宿主端(不在本仓库)
 
-`claude-sbx` 和 `claude-sbx2` 是调试过程产生的 stopped 沙箱,占着 microVM 资源但没在用。
-清理方法:
-
-```bash
-sbx stop claude-sbx
-sbx rm claude-sbx      # 在 Windows 上需 60s+
-```
-
-由于本项目函数刻意**不**自动 rm,这两个沙箱必须手动清。
-
-### 3. GitHub 化和 install.sh(下一轮)
-
-按用户上一轮指示,本轮**不上传云端**,只本地 git。但完整计划里:
-- 在 GitHub 创建 `sbx-kit` repo
-- 添加 `install.sh`:沙箱内 git clone repo → 拷贝文件 → 注册 hook → 启动 relay
-- `New-ClaudeSbx` 增加 `-Source GitHub` 参数
-- 双路径测试(Local + GitHub)
-
-### 4. 修复 `Test-ClaudeSbx` 函数的隐藏 bug
-
-`Test-ClaudeSbx` 第一行有 `sbx stop $Name 2>$null`,在测试前 stop 沙箱——但本项目设计**严格禁止**对 stopped 沙箱 rm,这条 stop 也是不必要的。Stop 之后 relay 可能因沙箱生命周期被回收。**建议直接删掉这行**。
-
-### 5. `settings.json` 末尾缺少换行符
-
-`git diff` 显示 `\ No newline at end of file`。下次提交时运行 `Add-Content settings.json ""` 或编辑器设"保存末尾换行"修复。
-
-## 进度快照(Context Snapshot)
-
-### 当前任务推进位置
-
-**第 N 轮 — 本地封装已完成**。Git 仓库已初始化,本地路径端到端验证通过:
-
-- ✅ 4 个核心文件已 commit(commit `ac0b487` "Initial commit: sbx Claude relay kit")
-- ✅ `New-ClaudeSbx` 已加载到 `$PROFILE`
-- ✅ 三种场景都跑通了:
-  - 新建(默认名):报错并提示
-  - 新建(新名):完整流程成功,claude 输出 "OK"
-  - 同名拒绝:正确抛错
-
-### 已创建/修改的核心文件
-
-| 路径 | 说明 |
+| 路径 | 角色 |
 |---|---|
-| `C:\Users\Zhaoji\Desktop\sbx\relay.py` | 4825 字节,HTTP relay,model name 改写 |
-| `C:\Users\Zhaoji\Desktop\sbx\start-relay.sh` | 910 字节,SessionStart hook |
-| `C:\Users\Zhaoji\Desktop\sbx\settings.json` | 940 字节,Claude Code 配置 |
-| `C:\Users\Zhaoji\Desktop\sbx\.gitignore` | 324 字节,排除 .vscode/、临时探针 |
-| `C:\Users\Zhaoji\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1` | 含 `New-ClaudeSbx`、`Push-SbxKit`、`Test-ClaudeSbx` 三个函数 |
-| `C:\Users\Zhaoji\Desktop\sbx\docs\ARCHITECTURE_AND_FLOW.md` | 本次生成的架构文档 |
-| `C:\Users\Zhaoji\Desktop\sbx\docs\TROUBLESHOOTING.md` | 本次生成的避坑指南 |
-| `C:\Users\Zhaoji\Desktop\sbx\docs\ACTIVE_STATE.md` | 本文档 |
+| `C:\Users\Zhaoji\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1` | 4 个 PowerShell 函数定义,shell 启动时自动加载 |
 
-### 当前可工作状态(端到端)
+### 一次性宿主配置(在 Windows Credential Manager)
 
-`New-ClaudeSbx -Name <new-name>` 在以下前提满足时**保证可用**:
-1. 宿主已注册 `cc.honoursoft.cn` 的 custom secret(只需一次)
-2. 选定名字在 `sbx ls` 中不存在(否则函数抛错)
-
-跑通后:`sbx run <new-name>` → Claude Code TUI → 通过中转站回复。
-
-## 下一步行动指令(Next Actionable Steps)
-
-如果你是下一个 Agent,读到这份文件,**第一步是**:
-
-### 1. 读取三个文件(按顺序)
-
-```
-docs/ARCHITECTURE_AND_FLOW.md   ← 理解系统怎么工作
-docs/TROUBLESHOOTING.md          ← 理解 5 个坑
-docs/ACTIVE_STATE.md             ← 你正在读的就是这个
+```bash
+sbx secret set-custom -g \
+    --host cc.honoursoft.cn \
+    --env ANTHROPIC_API_KEY \
+    --placeholder 'sk-ant-pcQNfJEvUIwr4IKQ' \
+    --value '<你的真实 Key>'
 ```
 
-### 2. 验证当前环境健康(可一键执行)
+> 真实 Key **永远**不出现在沙箱内、不出现在仓库内、不出现在 git history 中。
 
-在 PowerShell 跑:
+## 端到端工作流
+
+`New-ClaudeSbx -Name <新名>` 在以下前提满足时**保证可用**:
+
+1. 宿主已注册 `cc.honoursoft.cn` 的 custom secret(只需一次,见上)
+2. 选定名字在 `sbx ls` 中不存在(否则函数红字提示手动 rm 或换名)
+
+跑通后(任一 Source):
+
+- `Local`:`New-ClaudeSbx -Name foo` → 5 进度 + ok + [done]
+- `GitHub`:`New-ClaudeSbx -Name foo -Source GitHub` → 5 进度 + 3 子步 + [done]
+
+接着:
 
 ```powershell
-# 验证 profile 加载
-. $PROFILE
-Get-Command New-ClaudeSbx -Syntax
-
-# 验证沙箱
-sbx ls
-
-# 验证沙箱内 relay 在跑(替换成当前 running 的沙箱名)
-sbx exec <running-sandbox> bash -lc 'cat /tmp/relay.log'
+sbx run foo
+# 进 Claude Code TUI
+# 发任意消息, 期待通过 cc.honoursoft.cn 中转站拿到 Claude 响应
 ```
 
-如果 relay.log 末尾有 `POST /v1/messages?beta=true HTTP/1.1 200 -` 的最新记录,说明链路健康。
+## 维护指南
 
-### 3. 决定下一步动作(根据用户指令)
+### 场景 1:修改 kit 内容并推 GitHub
 
-| 用户指令 | 你要做的 |
+1. 改 `relay.py` / `start-relay.sh` / `settings.json` 任一(在 `C:\Users\Zhaoji\Desktop\sbx`)
+2. `git add` + `git commit -m "..."` + `git push origin main`
+3. 库内 `install.sh` 引用的是**库内版本**的 3 文件,**不需要**单独改 install.sh
+4. 现有沙箱:重跑 `sbx run <name>` 会通过 SessionStart hook **不**重读新文件(已经在沙箱内了);想更新沙箱内文件,跑 `Push-SbxKit` 或重建沙箱
+
+### 场景 2:加一个新沙箱
+
+```powershell
+# Local 模式(默认, 走 base64 推 3 文件)
+New-ClaudeSbx -Name dev-1
+
+# GitHub 模式(走沙箱内 git clone, 库和 install.sh 同源)
+New-ClaudeSbx -Name dev-1 -Source GitHub
+```
+
+### 场景 3:查 relay 健康
+
+```powershell
+sbx exec <name> bash -lc 'cat /tmp/relay.log | tail -n 20'
+sbx exec <name> bash -lc 'ls -la /home/agent/'
+```
+
+如果 relay.log 末尾有 `POST /v1/messages?beta=true HTTP/1.1 200 -`,说明链路健康。
+
+### 场景 4:清理 stopped 沙箱
+
+Windows 上 `sbx rm` 对 stopped 沙箱**卡 60s+**,这是已知行为(`TROUBLESHOOTING.md` 难点 3):
+
+```powershell
+sbx stop <name>
+sbx rm <name>      # 等 60s+, 不要 Ctrl+C
+```
+
+### 场景 5:加新 host(在新机器上跑这个项目)
+
+1. `git clone https://github.com/jigejiqiangshou/sbx-kit.git C:\path\to\sbx`
+2. 注册 secret(见上)
+3. 把 `$PROFILE` 中 4 个函数复制过去
+4. `New-ClaudeSbx -Name test-1` 跑通即可
+
+## 历史
+
+| 日期 | 事件 |
 |---|---|
-| "清理 stopped 沙箱" | 跑 `sbx stop <name>; sbx rm <name>`(每个 60s+),逐个清理 |
-| "清掉全局 network policy" | 跑 `sbx policy rm <id>` 删掉 `local/all` 那条 |
-| "做 GitHub 化" | 参见下方"GitHub 化清单" |
-| "直接修 `Test-ClaudeSbx` bug" | 删 `sbx stop` 那行,改 `Test-ClaudeSbx` 函数 |
-| "重新跑一遍完整测试" | 用新名 `claude-sbx4` 跑 `New-ClaudeSbx`,然后 `sbx run` 进 TUI |
+| 2026-06-14 上午 | 本地封装完成,3 文件 commit,`New-ClaudeSbx` / `Test-ClaudeSbx` 端到端验证 |
+| 2026-06-14 下午 | `New-ClaudeSbx` 零非计划性报错改造(加 `Invoke-Sbx` + 改用 `Write-Host` 红字) |
+| 2026-06-14 晚 | `Test-ClaudeSbx` bug 修复;GitHub 库 `jigejiqiangshou/sbx-kit` 创建 + `install.sh` push |
+| 2026-06-14 深夜 | `New-ClaudeSbx -Source {Local, GitHub}` 双路径实现,TUI 验证通过 |
+| 2026-06-15 | 文档完善,`README.md` 新建,4 个文件 commit + push |
 
-### GitHub 化清单(下一轮预期要做)
+## 下一步行动指令(已废弃)
 
-1. 在 GitHub 创建 repo `sbx-kit`
-2. 添加 `install.sh`:git clone → 部署 3 文件 + 注册 hook
-3. `New-ClaudeSbx` 增加 `-Source {Local, GitHub}` 参数
-4. 加 `Update-SbxKit` 轻量函数(只跑 `install.sh`,不重建沙箱)
-5. 双路径测试:
-   - Local:从 `C:\Users\Zhaoji\Desktop\sbx` 推文件
-   - GitHub:沙箱内 git clone → install.sh
-   - 两条路径的最终态必须等价
+历史上 `ACTIVE_STATE.md` 含此节,列了 5 条 TODO 指令。**所有 TODO 已完成**,本节保留仅为向后兼容:
+
+> ~~如果你是下一个 Agent,读到这份文件,第一步是:~~(已不适用,见"项目状态"段)

@@ -1,6 +1,6 @@
 # 避坑指南
 
-提取开发过程中遇到的 5 个真实技术难点。每个都按"现象 → 根因 → 修复"组织。
+提取开发过程中遇到的 9 个真实技术难点。每个都按"现象 → 根因 → 修复"组织。
 
 ---
 
@@ -71,25 +71,19 @@ MODEL_MAP = {
 - 手动测试超时 60 秒
 - `sbx ls` 一直显示沙箱处于 `stopped` 状态
 
-**根因** [TODO: 需要人类补充确切报错信息] :
+**根因**:
 - Docker Sandboxes v0.32.0 在 Windows 上对已 stopped 的 microVM 资源,**后台异步释放**需要 60+ 秒
 - `sbx rm` 等待 microVM 完全释放后才返回删除
 - 这跟 Linux 上 stop → rm 几秒内完成的行为完全不同
 
 **修复**:
 - **不在 `New-ClaudeSbx` 里调用 `sbx rm`**
-- 函数在检测到同名沙箱时**直接 `throw`** 退出,让用户手动处理:
+- 函数在检测到同名沙箱时**直接**红字 `Write-Host` 退出,让用户手动处理
 
 ```powershell
-if ($existingNames -contains $Name) {
-    throw @"
-Sandbox '$Name' already exists. Refusing to continue.
-To reuse this name:
-    sbx stop $Name
-    sbx rm $Name          # may take >60s on Windows
-Or pick a different name:
-    New-ClaudeSbx -Name claude-sbx-$(Get-Date -Format 'yyyyMMdd')
-"@
+if ($existing -contains $Name) {
+    Write-Host "[ERROR] Sandbox '$Name' already exists. ..." -ForegroundColor Red
+    return
 }
 ```
 
@@ -146,7 +140,7 @@ disown 2>/dev/null
 - 但 PowerShell 抛出红色 `ERROR` 块:
 
 ```
-+ CategoryInfo          : NotSpecified: (INFO: Configuring Docker:String)  
++ CategoryInfo          : NotSpecified: (INFO: Configuring Docker:String)
    [], RemoteException
 + FullyQualifiedErrorId : NativeCommandError
 Command exited with code 1
@@ -157,7 +151,7 @@ Command exited with code 1
 - PowerShell 7+ 默认把 stderr 行包装成 `RemoteException` ErrorRecord
 - 实际 Exit Code 1 是**虚假的**:`sbx run` 成功,只是内部 subprocess 退出码非 0 触发了 PowerShell 的 `$?` 失败标志
 
-**修复**:
+**修复**(部分):
 - 所有 `sbx` 命令后接 `2>&1 | Out-Null`,把 stderr 也吞掉
 - 关键命令前用 `if ($LASTEXITCODE -ne 0 ...)` 显式检查,避免被 PowerShell 误判打断后续逻辑
 
@@ -168,4 +162,165 @@ if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) {
 }
 ```
 
-**注意**:这条会**同时屏蔽**真实错误。如果 `sbx create` 真的失败,需要手动检查 `sbx ls` 看沙箱是否存在,不能依赖 PowerShell 的 exit code 信号。
+**注意**:这条**只**部分解决问题。完整修复见难点 6(用 `*>&1` + `Invoke-Sbx`)。
+
+---
+
+## 难点 6:`2>&1 | Out-Null` 不够,要用 `*>&1` + `Invoke-Sbx`
+
+**现象**:
+- 写了 `$secretOut = sbx secret ls 2>&1 | Out-String`,PowerShell 仍然渲染红色 ERROR 块
+- 用 `2>&1 | Out-Null` 吞 stderr 之后,`$LASTEXITCODE` 经常**不是预期值**(显示 1,实际 0)
+- `New-ClaudeSbx` 步骤 3 `sbx create` 每次都"失败",但 `sbx ls` 显示沙箱真的创建了
+
+**根因**:
+- PowerShell 7+ 渲染 `NativeCommandError` 走 **ErrorRecord 通道**,**不**只是 stderr 重定向能解决的
+- 即便你 `2>&1` 把 stderr 合并到 stdout 进管道,`$LASTEXITCODE` 是**最后一个** native 命令的退出码,不是 `sbx` 整体的
+- `2>&1 | Out-Null` 把**整条管道**的退出码吞了,后续 `if ($LASTEXITCODE -ne 0)` 拿到的是 `Out-Null` 的退出码(永远 0),判断失真
+- 必须 `*>&1` 把**所有**流(成功 + 错误 + 警告 + 信息 + 调试 + verbose)统一重定向,才能彻底切断 ErrorRecord 渲染
+
+**修复**:
+- 用专用 helper `Invoke-Sbx` 包装,三件套:
+
+```powershell
+function Invoke-Sbx {
+    param([Parameter(Mandatory)][string[]]$Args)
+    $prev = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'SilentlyContinue'   # 1. 抑制 NativeCommandError 渲染
+        & sbx @Args *>&1 | Out-Null                   # 2. *>&1 吞所有流(不漏 stderr)
+        return $LASTEXITCODE                          # 3. 直接拿 sbx 退出码
+    } finally {
+        $ErrorActionPreference = $prev                # 4. 还原,只影响一次调用
+    }
+}
+```
+
+- `*>&1` 是 PowerShell 5+ 的"all streams"重定向
+- 临时切 `ErrorActionPreference = 'SilentlyContinue'` 是关键 — 这会让 PowerShell **不**把 stderr 写动作包装成 ErrorRecord
+- `finally` 块保证还原 — 只在**这次**调用内生效,不污染其他命令
+
+**`New-ClaudeSbx` 内的标准用法**:
+```powershell
+$rc = Invoke-Sbx -Args @('create', '--name', $Name, 'claude', '.')
+if ($rc -ne 0) {
+    Write-Host "[ERROR] sbx create failed (exit $rc)" -ForegroundColor Red
+    return
+}
+```
+
+**注意**:
+- `Test-ClaudeSbx` **故意**不走 `Invoke-Sbx`,因为 `sbx run` 需要把 `Workspace:` / `OK` 等 stdout 透传给用户看
+- 红色 ERROR 块在 `Test-ClaudeSbx` 输出里**是已知**的(`sbx` INFO 写 stderr),不影响 `OK` 输出
+
+---
+
+## 难点 7:`sbx exec` 里的命令含 `//` 被 PowerShell 解析成 drive 路径
+
+**现象**:
+- 跑 `sbx exec sandbox bash -c 'curl http://127.0.0.1:8765/v1/models'`
+- PowerShell 报:
+  ```
+  curl: (2) no URL specified
+  curl: try 'curl --help' or 'curl --manual' for more information
+  ```
+- 在沙箱外直接 `curl http://127.0.0.1:8765/v1/models` 完全正常
+
+**根因**:
+- PowerShell 解析单引号字符串时,把 `//` 当作 UNC 路径前缀(`\\server\share`)
+- 引号内的 `//` 被切分,curl 收到一个不含 URL 的空参数
+- 跟 `curl` 本身无关,跟 PowerShell **字符串解析**有关
+
+**修复**:
+- **不能**直接在 PowerShell 命令行里写含 `//` 的 URL
+- 改用**两步法**:把命令写到本地文件 → base64 推沙箱 → 沙箱内 `bash <file>`
+
+```powershell
+# 1. 写命令到本地文件 (含 ://, Windows 不解析,纯字节)
+Set-Content -Path C:\Users\Zhaoji\Desktop\sbx\probe.sh -Value "curl http://127.0.0.1:8765/v1/models" -Encoding ASCII
+
+# 2. 编码成 LF + base64
+$bytes = [IO.File]::ReadAllBytes("C:\Users\Zhaoji\Desktop\sbx\probe.sh")
+$lf = $bytes -ne [byte]13    # 去 CR
+$b = [Convert]::ToBase64String($lf)
+
+# 3. 推入沙箱并执行
+sbx exec sandbox bash -c "echo $b | base64 -d > /tmp/probe.sh && bash /tmp/probe.sh"
+```
+
+**注意**:
+- PowerShell 命令行用 `[char]58 + [char]47 + [char]47` 拼 `://` 的方案**不可靠**(单引号转义在不同 PS 版本行为不一致)
+- 写文件 → base64 → 沙箱解码的"通道法"是**唯一**可靠的方案
+
+---
+
+## 难点 8:Windows `create_file` 写 CRLF,沙箱内 bash 把 `\r` 当命令
+
+**现象**:
+- 用 `create_file` 写一个 bash 脚本,内容里只有 `echo hello`
+- base64 推到沙箱,沙箱内 `bash /tmp/script.sh`
+- 报:
+  ```
+  /tmp/script.sh: line 2: $'echo\r': command not found
+  ```
+
+**根因**:
+- `create_file`(和很多 Windows 编辑器)默认写 **CRLF (0D 0A)** 行尾
+- Linux bash 解释器把 `\r`(0D)当**一个独立的字符**,直接当命令字符
+- 整行 `echo hello\r` 解析成 `echo` + ` ` + `hello` + 0x0D → 报命令 not found
+
+**修复**(PowerShell 端,写之前过滤):
+```powershell
+$path = "C:\path\to\script.sh"
+$bytes = [IO.File]::ReadAllBytes($path)
+$lf = $bytes -ne [byte]13    # 把 0D 全去掉,只留 0A
+[IO.File]::WriteAllBytes($path, $lf)
+```
+
+**修复**(写时显式 LF,如果工具支持):
+- `Set-Content -Encoding UTF8` 在 PowerShell 7+ 默认 LF(不带 BOM)
+- `Set-Content -Encoding Ascii` 在 PowerShell 5+ 是 UTF-16(更糟)
+- **最稳**的还是上面那种 "read 字节 → 过滤 0D → write 字节"
+
+**沙箱端修复**(在 install.sh 里加 `sed -i 's/\r$//'`):
+- 如果你**不能**在 host 端过滤(比如命令是临时拼的),在沙箱内跑:
+  ```bash
+  sed -i 's/\r$//' /tmp/script.sh && bash /tmp/script.sh
+  ```
+- 这条作为**fallback**保留,host 端过滤仍是首选
+
+---
+
+## 难点 9:沙箱冷启动后立即 `curl` 报 ConnectionRefused
+
+**现象**:
+- 沙箱刚 `sbx create` 完,`sbx ls` 显示 running
+- 立刻 `sbx exec sandbox bash -lc 'curl http://127.0.0.1:8765/v1/models'`
+- 报: `Failed to connect to 127.0.0.1 port 8765 ... Connection refused`
+- 沙箱内 `/tmp/relay.log` 是空的,relay 根本没启动
+
+**根因**:
+- `sbx exec` **会**触发沙箱冷启动(若沙箱未启动)
+- 但 `SessionStart` hook **只**在 `claude` 启动时触发(`sbx run <name>`)
+- `sbx exec bash -c ...` **不**触发 hook,relay **不**会自启
+- 这是设计:`SessionStart` 跟 Claude Code 生命周期绑定,不是跟 microVM
+
+**修复**(临时探针用):
+```powershell
+# 先手动拉起 relay
+sbx exec sandbox bash -lc '/home/agent/start-relay.sh'
+
+# 再发请求
+sbx exec sandbox bash -lc 'curl http://127.0.0.1:8765/v1/models'
+```
+
+**修复**(生产用,推荐):
+- 永远用 `sbx run <name>` 进 Claude Code TUI,让 hook 自然触发
+- `Test-ClaudeSbx -Name <name>`(走 `--print "respond OK"`)也会触发 hook
+- 真正需要"无 claude 启动,只要 relay"的场景,显式 `sbx exec ... start-relay.sh`
+
+**注意**:
+- 这个"ConnectionRefused"**不是** relay 配置错误
+- 不是占位符替换问题
+- 不是 `cc.honoursoft.cn` 网络问题
+- 是测试探针流程不完整 — 缺少"启 relay"这一步
